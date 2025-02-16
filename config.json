@@ -1,0 +1,19 @@
+{
+    "credentials": {
+        "username": "YOUR_USERNAME",
+        "password": "YOUR_PASSWORD"
+    },
+    "download": {
+        "save_directory": "DOWNLOAD_FOLDER_PATH",
+        "artist_username": "ARTIST_NAME"
+    },
+    "api": {
+        "base_url": "https://inkbunny.net/",
+        "submissions_per_page": 100,
+        "submission_types": "1,2,3,4,5",
+        "delay": {
+            "between_files": 1,
+            "between_pages": 2
+        }
+    }
+}
