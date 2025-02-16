@@ -3,23 +3,62 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 from pathlib import Path
-
 from datetime import datetime
 
-log_filename = datetime.now().strftime('%Y%m%d_%H%M%S.log')
-os.makedirs('logs', exist_ok=True)
+def get_config_path():
+    if getattr(sys, 'frozen', False):
+        application_path = os.path.dirname(sys.executable)
+    else:
+        application_path = os.path.dirname(os.path.abspath(__file__))
+    
+    config_path = os.path.join(application_path, 'config.json')
+    
+    if not os.path.exists(config_path):
+        default_config = {
+            "credentials": {
+                "username": "",
+                "password": ""
+            },
+            "download": {
+                "save_directory": os.path.join(application_path, "downloads"),
+                "artist_username": ""
+            },
+            "api": {
+                "base_url": "https://inkbunny.net/",
+                "submissions_per_page": 100,
+                "submission_types": "1,2,3,4,5",
+                "delay": {
+                    "between_files": 1,
+                    "between_pages": 2
+                }
+            }
+        }
+        
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(default_config, f, indent=4)
+            
+    return config_path
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.join('logs', log_filename)),
-        logging.StreamHandler()
-    ]
-)
+def setup_logging():
+    log_dir = 'logs'
+    if getattr(sys, 'frozen', False):
+        log_dir = os.path.join(os.path.dirname(sys.executable), 'logs')
+    
+    os.makedirs(log_dir, exist_ok=True)
+    log_filename = os.path.join(log_dir, datetime.now().strftime('%Y%m%d_%H%M%S.log'))
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_filename),
+            logging.StreamHandler()
+        ]
+    )
 
 @dataclass
 class APIConfig:
@@ -190,8 +229,10 @@ class InkbunnyDownloader:
             return []
 
     async def download_file(self, url: str, filename: str, save_dir: str) -> bool:
-        os.makedirs(save_dir, exist_ok=True)
-        filepath = Path(save_dir) / filename
+        artist_folder = os.path.join(save_dir, self.download_config.artist_username)
+        os.makedirs(artist_folder, exist_ok=True)
+        
+        filepath = Path(artist_folder) / filename
         
         if filepath.exists():
             logging.info(f"File already exists: {filename}")
@@ -239,7 +280,7 @@ class InkbunnyDownloader:
                     
                 original_filename = file_obj.get("file_name", "")
                 clean_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_'))[:50]
-                filename = f"{self.download_config.artist_username}_{clean_title}_{original_filename}"
+                filename = f"{clean_title}_{original_filename}"
                 
                 if await self.download_file(url, filename, self.download_config.save_directory):
                     downloaded_count += 1
@@ -249,7 +290,10 @@ class InkbunnyDownloader:
 
 async def main():
     try:
-        with open("config.json", 'r', encoding='utf-8') as f:
+        setup_logging()
+        config_path = get_config_path()
+        
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
         
         downloader = InkbunnyDownloader(config)
@@ -289,6 +333,8 @@ async def main():
     except Exception as e:
         logging.error(f"Program error: {str(e)}")
         raise
+    finally:
+        input("\nPress Enter to exit...")
 
 if __name__ == "__main__":
     asyncio.run(main())
