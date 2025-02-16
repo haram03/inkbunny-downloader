@@ -1,4 +1,4 @@
-# InkBunny 작품 다운로더
+# InkBunny Downloader
 
 ## 요구사항 및 설치방법
 
