@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 from datetime import datetime
 
@@ -174,7 +174,7 @@ class InkbunnyDownloader:
             logging.error(f"Error getting user ID: {str(e)}")
             return None
 
-    async def get_user_submissions(self, user_id: str, page: int = 1) -> List[Dict]:
+    async def get_user_submissions(self, user_id: str, page: int = 1) -> Tuple[List[Dict], int]:
         if not self.session_id:
             raise ValueError("Not logged in")
             
@@ -195,12 +195,13 @@ class InkbunnyDownloader:
                 async with session.get(search_url, params=params) as response:
                     if response.status == 200:
                         data = await response.json()
-                        return data.get("submissions", [])
+                        total_pages = int(data.get("pages_count", 1))
+                        return data.get("submissions", []), total_pages
                     logging.error(f"Failed to get submissions (page {page})")
-                    return []
+                    return [], 0
         except aiohttp.ClientError as e:
             logging.error(f"Error getting submissions: {str(e)}")
-            return []
+            return [], 0
 
     async def get_submission_files(self, submission_id: str) -> List[Dict]:
         if not self.session_id:
@@ -262,7 +263,7 @@ class InkbunnyDownloader:
                 
         return False
 
-    async def process_submission(self, submission: Dict[str, Any]) -> int:
+    async def process_submission(self, submission: Dict[str, Any]) -> Tuple[int, bool]:
         submission_id = submission["submission_id"]
         title = submission.get("title", "untitled")
         
@@ -270,6 +271,7 @@ class InkbunnyDownloader:
         
         files_info = await self.get_submission_files(submission_id)
         downloaded_count = 0
+        all_files_exist = True
         
         for file_info in files_info:
             for file_obj in file_info.get("files", []):
@@ -282,11 +284,16 @@ class InkbunnyDownloader:
                 clean_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_'))[:50]
                 filename = f"{clean_title}_{original_filename}"
                 
-                if await self.download_file(url, filename, self.download_config.save_directory):
-                    downloaded_count += 1
-                    await asyncio.sleep(self.api_config.delay['between_files'])
-                    
-        return downloaded_count
+                filepath = Path(os.path.join(self.download_config.save_directory, 
+                                           self.download_config.artist_username, 
+                                           filename))
+                if not filepath.exists():
+                    all_files_exist = False
+                    if await self.download_file(url, filename, self.download_config.save_directory):
+                        downloaded_count += 1
+                        await asyncio.sleep(self.api_config.delay['between_files'])
+                
+        return downloaded_count, all_files_exist
 
 async def main():
     try:
@@ -313,18 +320,32 @@ async def main():
         page = 1
         total_downloads = 0
         
-        while True:
-            submissions = await downloader.get_user_submissions(user_id, page)
-            if not submissions:
-                break
-                
-            logging.info(f"\nProcessing page {page}...")
+        submissions, total_pages = await downloader.get_user_submissions(user_id, page)
+        if not submissions:
+            logging.info("No submissions found.")
+            return
+            
+        logging.info(f"Found {total_pages} pages of submissions")
+        
+        while page <= total_pages:
+            if page > 1:  
+                submissions, _ = await downloader.get_user_submissions(user_id, page)
+                if not submissions:
+                    logging.info("No more submissions found.")
+                    break
+            
+            logging.info(f"\nProcessing page {page} of {total_pages}...")
             
             for submission in submissions:
-                downloaded = await downloader.process_submission(submission)
+                downloaded, _ = await downloader.process_submission(submission)
                 total_downloads += downloaded
-                
+            
             logging.info(f"Page {page} completed")
+            
+            if page == total_pages:
+                logging.info("Reached the last page. Download completed.")
+                break
+                
             page += 1
             await asyncio.sleep(downloader.api_config.delay['between_pages'])
             
